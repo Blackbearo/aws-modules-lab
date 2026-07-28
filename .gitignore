@@ -1,0 +1,19 @@
+# Terraform 本機快取
+.terraform/
+
+# State 檔（存在 S3，不進版控）
+*.tfstate
+*.tfstate.*
+
+# 機密（密碼等）
+*.auto.tfvars
+
+# 當機記錄
+crash.log
+crash.*.log
+
+# 覆寫用的本機設定
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
