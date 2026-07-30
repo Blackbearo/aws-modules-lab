@@ -1,19 +1,10 @@
 terraform {
   required_providers {
-    http = {
-      source  = "hashicorp/http"
-      version = "~> 3.4"
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
     }
   }
-}
-
-data "http" "my_ip" {
-  url = "https://checkip.amazonaws.com"
-}
-
-locals {
-  # chomp 用於去除回傳結尾換行，否則 CIDR 格式錯誤
-  ssh_cidr = "${chomp(data.http.my_ip.response_body)}/32"
 }
 
 resource "aws_security_group" "bastion" {
@@ -21,12 +12,18 @@ resource "aws_security_group" "bastion" {
   description = "bastion ssh"
   vpc_id      = var.vpc_id
 
-  ingress {
-    description = "SSH from current IP"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [local.ssh_cidr]
+  # admin_cidrs 為空清單時不產生任何 ingress，22 port 完全關閉。
+  # SG 本體必須保留：aws_security_group.app 引用了它的 id。
+  # 需要臨時 SSH 時走 break-glass，下次 apply 會自動清掉。
+  dynamic "ingress" {
+    for_each = length(var.admin_cidrs) > 0 ? [1] : []
+    content {
+      description = "SSH from admin networks"
+      from_port   = 22
+      to_port     = 22
+      protocol    = "tcp"
+      cidr_blocks = var.admin_cidrs
+    }
   }
 
   egress {

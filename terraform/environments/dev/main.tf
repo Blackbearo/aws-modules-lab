@@ -27,6 +27,7 @@ module "web_tier" {
   instance_type      = var.instance_type
   min_size           = var.min_size
   max_size           = var.max_size
+  admin_cidrs        = var.admin_cidrs
 }
 
 module "database" {

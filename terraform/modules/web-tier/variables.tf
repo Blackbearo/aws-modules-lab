@@ -45,3 +45,9 @@ variable "max_size" {
   type    = number
   default = 4
 }
+
+variable "admin_cidrs" {
+  description = "允許 SSH 的來源網段。預設為空 = 不開放 22 port"
+  type        = list(string)
+  default     = []
+}

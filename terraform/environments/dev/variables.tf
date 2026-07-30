@@ -34,3 +34,9 @@ variable "db_password" {
   type      = string
   sensitive = true
 }
+
+variable "admin_cidrs" {
+  description = "允許 SSH 進 bastion 的來源網段。空清單 = 不開放 22 port"
+  type        = list(string)
+  default     = []
+}
