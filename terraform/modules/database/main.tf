@@ -1,7 +1,7 @@
 resource "aws_db_subnet_group" "this" {
   name       = "${var.env_name}-db-subnets"
   subnet_ids = var.subnet_ids
-  tags = { Name = "${var.env_name}-db-subnets" }
+  tags       = { Name = "${var.env_name}-db-subnets" }
 }
 
 resource "aws_security_group" "db" {
@@ -42,7 +42,7 @@ resource "aws_db_instance" "this" {
   db_subnet_group_name   = aws_db_subnet_group.this.name
   vpc_security_group_ids = [aws_security_group.db.id]
   publicly_accessible    = false
-  multi_az                = var.multi_az
+  multi_az               = var.multi_az
 
   # prod 環境務必評估開 deletion_protection,並移除 skip_final_snapshot
   skip_final_snapshot = var.env_name == "prod" ? false : true

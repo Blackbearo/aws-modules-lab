@@ -23,8 +23,8 @@ variable "instance_class" {
 
 variable "multi_az" {
   description = "prod 建議開 true,dev/staging 可 false 省錢"
-  type    = bool
-  default = false
+  type        = bool
+  default     = false
 }
 
 variable "db_password" {
