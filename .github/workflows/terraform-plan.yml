@@ -27,7 +27,7 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::<ACCOUNT_ID>:role/gh-terraform-plan
+          role-to-assume: arn:aws:iam::575005867578:role/gh-terraform-plan
           aws-region: ap-northeast-1
 
       - name: 確認身分（除錯用，成功後可刪）
