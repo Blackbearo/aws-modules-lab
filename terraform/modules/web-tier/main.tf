@@ -94,6 +94,7 @@ resource "aws_security_group" "app" {
   tags = { Name = "${var.env_name}-sg-app" }
 }
 
+#trivy:ignore:AWS-0053 ALB 為對外服務入口,公開暴露是設計本身
 resource "aws_lb" "this" {
   # checkov:skip=CKV2_AWS_28:dev 環境不啟用 WAF(約 $5/月 + 請求費);prod 必須掛 WAFv2
   # checkov:skip=CKV_AWS_150:lab 環境需可反覆 destroy,啟用刪除保護會造成阻礙;prod 必須開啟
@@ -126,6 +127,7 @@ resource "aws_lb_target_group" "tomcat" {
   tags = { Name = "${var.env_name}-tg-tomcat" }
 }
 
+#trivy:ignore:AWS-0054 HTTPS 需 ACM 憑證與網域,屬獨立工程,列入 backlog
 resource "aws_lb_listener" "http" {
   # checkov:skip=CKV_AWS_2:HTTPS 需 ACM 憑證與網域,屬獨立工程,列入 backlog
   # checkov:skip=CKV_AWS_103:同上,TLS 1.2 設定需先有 HTTPS listener

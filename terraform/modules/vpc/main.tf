@@ -13,6 +13,7 @@ resource "aws_default_security_group" "this" {
   tags   = { Name = "${var.env_name}-sg-default-locked" }
 }
 
+#trivy:ignore:AWS-0164 public subnet 依定義供對外資源使用,自動配發公有 IP 為預期行為
 resource "aws_subnet" "public" {
   # checkov:skip=CKV_AWS_130:public subnet 依定義供對外資源使用,自動配發公有 IP 為預期行為
   count                   = length(var.azs)
