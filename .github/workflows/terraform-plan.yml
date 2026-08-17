@@ -49,7 +49,6 @@ jobs:
           scan-ref: terraform/
           severity: HIGH,CRITICAL
           exit-code: '0'
-          trivy-config: ''
 
       - name: Checkov
         uses: bridgecrewio/checkov-action@master
