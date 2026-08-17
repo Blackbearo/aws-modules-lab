@@ -41,6 +41,23 @@ jobs:
 
       - name: init
         run: terraform init -input=false
+      
+      - name: Trivy config scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: terraform/
+          severity: HIGH,CRITICAL
+          exit-code: '0'
+          trivy-config: ''
+
+      - name: Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: terraform/
+          framework: terraform
+          soft_fail: true
+          output_format: cli
 
       - name: validate
         run: terraform validate
