@@ -1,0 +1,56 @@
+name: terraform-apply
+
+# GitHub Free/Pro/Team 的 private repo 無法使用 environment required reviewers，
+# 改以「手動觸發 + 打字確認」作為人工介入閘門。
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: '輸入 apply 以確認執行（大小寫需相符）'
+        required: true
+        default: ''
+
+concurrency:
+  group: tf-dev-apply
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: dev
+    defaults:
+      run:
+        working-directory: terraform/environments/dev
+    steps:
+      - name: 確認輸入
+        if: inputs.confirm != 'apply'
+        run: |
+          echo "confirm 欄位必須輸入 apply，實際收到：'${{ inputs.confirm }}'"
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::575005867578:role/gh-terraform-apply
+          aws-region: ap-northeast-1
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+          terraform_wrapper: false
+
+      - name: init
+        run: terraform init -input=false
+
+      - name: apply
+        env:
+          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+        run: terraform apply -auto-approve -input=false -lock-timeout=10m
+
+      - name: 輸出結果
+        run: terraform output
