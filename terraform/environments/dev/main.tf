@@ -28,6 +28,7 @@ module "web_tier" {
   min_size           = var.min_size
   max_size           = var.max_size
   admin_cidrs        = var.admin_cidrs
+  vpc_cidr           = var.vpc_cidr
 }
 
 module "database" {
@@ -38,4 +39,5 @@ module "database" {
   app_security_group_id = module.web_tier.app_sg_id
   instance_class        = var.db_instance_class
   db_password           = var.db_password
+  vpc_cidr              = var.vpc_cidr
 }

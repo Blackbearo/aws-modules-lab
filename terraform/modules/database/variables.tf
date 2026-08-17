@@ -31,3 +31,9 @@ variable "db_password" {
   type      = string
   sensitive = true
 }
+
+variable "vpc_cidr" {
+  description = "VPC 網段,用於收窄 egress 規則"
+  type        = string
+}
+

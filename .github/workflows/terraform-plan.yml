@@ -48,14 +48,14 @@ jobs:
           scan-type: config
           scan-ref: terraform/
           severity: HIGH,CRITICAL
-          exit-code: '0'
+          exit-code: '1'
 
       - name: Checkov
         uses: bridgecrewio/checkov-action@master
         with:
           directory: terraform/
           framework: terraform
-          soft_fail: true
+          soft_fail: false
           output_format: cli
 
       - name: validate

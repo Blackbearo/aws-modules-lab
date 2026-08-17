@@ -13,3 +13,9 @@ variable "azs" {
   type        = list(string)
   default     = ["ap-northeast-1a", "ap-northeast-1c"]
 }
+
+variable "flow_log_retention_days" {
+  description = "VPC Flow Log 在 CloudWatch 的保存天數。dev 設短以控制成本"
+  type        = number
+  default     = 30
+}
