@@ -14,6 +14,7 @@ resource "aws_s3_bucket_versioning" "tfstate" {
   }
 }
 
+#trivy:ignore:AWS-0132 SSE-S3 已足夠：已 block public 且僅 CI role 可存取；CMK 需額外費用且所有 role 要補 KMS 權限
 resource "aws_s3_bucket_server_side_encryption_configuration" "tfstate" {
   bucket = aws_s3_bucket.tfstate.id
 
