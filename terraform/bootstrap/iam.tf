@@ -77,6 +77,13 @@ resource "aws_iam_role_policy_attachment" "apply_poweruser" {
   policy_arn = "arn:aws:iam::aws:policy/PowerUserAccess"
 }
 
+data "aws_caller_identity" "current" {}
+
+locals {
+  # 對應 modules/vpc：name = "${var.env_name}-vpc-flow-logs-role"（dev、staging 共用）
+  flow_logs_role_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*-vpc-flow-logs-role"
+}
+
 resource "aws_iam_role_policy" "apply_access" {
   name = "tfapply-dev-access"
   role = aws_iam_role.apply.name
@@ -99,10 +106,21 @@ resource "aws_iam_role_policy" "apply_access" {
           "iam:ListInstanceProfilesForRole",
           "iam:TagRole",
           "iam:UntagRole",
-          "iam:PassRole",
-          "iam:CreateServiceLinkedRole",
         ]
-        Resource = "*"
+        Resource = local.flow_logs_role_arn
+      },
+      {
+        Sid       = "PassFlowLogsRole"
+        Effect    = "Allow"
+        Action    = "iam:PassRole"
+        Resource  = local.flow_logs_role_arn
+        Condition = { StringEquals = { "iam:PassedToService" = "vpc-flow-logs.amazonaws.com" } }
+      },
+      {
+        Sid      = "ServiceLinkedRoles"
+        Effect   = "Allow"
+        Action   = "iam:CreateServiceLinkedRole"
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/aws-service-role/*"
       },
       {
         Sid      = "TerraformStateObjects"
