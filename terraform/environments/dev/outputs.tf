@@ -3,5 +3,5 @@ output "alb_dns" {
 }
 
 output "rds_endpoint" {
-  value = module.database.endpoint
+  value = module.db.endpoint
 }
