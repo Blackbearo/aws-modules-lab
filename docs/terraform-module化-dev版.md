@@ -2,7 +2,7 @@
 
 > 專案：aws-modules-lab
 > 狀態：**已驗證成功**，24 個資源建置完成，ALB 可正常回應
-> 範圍：dev 單一環境。staging / prod 擴充方式見第 9 節
+> 範圍：以 dev 說明 module 設計；staging 見第 9 節，EKS 環境（`environments/eks`）另見 `terraform-cicd-oidc-roadmap.md` 階段 5
 
 ---
 
@@ -58,12 +58,16 @@ terraform/
       outputs.tf
   environments/
     dev/
-      main.tf                  呼叫三個 module
+      main.tf                  呼叫三個 module（vpc、web_tier、db）
+      moved.tf                 module.database → module.db（改名不重建）
       variables.tf             宣告接受哪些變數
       terraform.tfvars         實際數值
       secrets.auto.tfvars      密碼（不進 Git）
       backend.tf               state 存放位置
       outputs.tf               對外輸出 ALB 網址等
+    staging/                   同 dev 結構，換 tfvars 與 backend key
+    eks/                       vpc（enable_nat = true）+ 社群 EKS module
+  bootstrap/                   state bucket、OIDC、CI role（本機 apply，CI 不碰）
 ```
 
 `modules/` 與 `environments/` 為平行資料夾，不可互相包含。
@@ -94,6 +98,12 @@ variable "azs" {
   description = "使用的可用區，長度決定 subnet 組數"
   type        = list(string)
   default     = ["ap-northeast-1a", "ap-northeast-1c"]
+}
+
+variable "enable_nat" {
+  description = "建 NAT Gateway（EKS node 在 private subnet 要出網）；dev 不開"
+  type        = bool
+  default     = false
 }
 ```
 
@@ -192,7 +202,35 @@ resource "aws_route_table_association" "private" {
   subnet_id      = aws_subnet.private[count.index].id
   route_table_id = aws_route_table.private.id
 }
+
+# ══════════════════════════════════════════
+# NAT 開關：enable_nat = true 才建（eks 用；dev 不開，每月省約 $32）
+# count = 條件 ? 1 : 0，引用時寫 [0]
+# ══════════════════════════════════════════
+resource "aws_eip" "nat" {
+  count  = var.enable_nat ? 1 : 0
+  domain = "vpc"
+  tags   = { Name = "${var.env_name}-nat-eip" }
+}
+
+resource "aws_nat_gateway" "this" {
+  count         = var.enable_nat ? 1 : 0
+  allocation_id = aws_eip.nat[0].id
+  subnet_id     = aws_subnet.public[0].id
+  tags          = { Name = "${var.env_name}-nat" }
+
+  depends_on = [aws_internet_gateway.this]
+}
+
+resource "aws_route" "private_nat" {
+  count                  = var.enable_nat ? 1 : 0
+  route_table_id         = aws_route_table.private.id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.this[0].id
+}
 ```
+
+> 實際檔案另有 Flow Logs、預設 SG 鎖定、subnet `kubernetes.io/role/*` tag，完整內容見 `terraform-cicd-oidc-roadmap.md` 階段 3 附錄。
 
 ### `modules/vpc/outputs.tf`
 
@@ -637,7 +675,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
   }
 }
@@ -667,7 +705,7 @@ module "web_tier" {
   max_size           = var.max_size
 }
 
-module "database" {
+module "db" {
   source                = "../../modules/database"
   env_name              = var.env_name
   vpc_id                = module.vpc.vpc_id
@@ -675,6 +713,16 @@ module "database" {
   app_security_group_id = module.web_tier.app_sg_id
   instance_class        = var.db_instance_class
   db_password           = var.db_password
+}
+```
+
+### `moved.tf`
+
+```hcl
+# module 名稱由 database 改為 db：只改 state 地址，RDS 不重建（plan 0 change）
+moved {
+  from = module.database
+  to   = module.db
 }
 ```
 
@@ -768,7 +816,7 @@ output "alb_dns" {
 
 output "rds_endpoint" {
   description = "psql -h 這個位址連線"
-  value       = module.database.endpoint
+  value       = module.db.endpoint
 }
 ```
 
@@ -784,7 +832,7 @@ Terraform 預設將 state 存於本機。缺點：團隊無法協作、兩人同
 
 ### bucket 必須手動建立
 
-bucket 必須先存在，Terraform 才有地方寫入 state，因此不能由 Terraform 自身建立。手動建立一次即可，未來新增環境不需再建。
+bucket 必須先存在，Terraform 才有地方寫入 state，因此不能由使用它的環境建立。先手動建立一次，之後由 `terraform/bootstrap/` 以 `import` 接管（加 `prevent_destroy`，只在本機 apply），新增環境不需再建。
 
 **Console 設定**（介面若為機翻版，文字可能與英文原名不同；`Discontinued` 即 Disable）
 
@@ -835,7 +883,7 @@ aws s3api put-public-access-block \
 
 ## 9. 新增 staging / prod 的方式
 
-現有結構已為多環境做好準備，屆時只需：
+staging 已依此流程建立（`environments/staging`，10.20.0.0/16，apply 29 個資源驗證後 destroy）。新增環境只需：
 
 1. 複製整個 `environments/dev/` 為 `environments/staging/`
 2. 改 `terraform.tfvars`：`env_name` 改為 `staging`、`vpc_cidr` 改為不重疊網段（例如 10.20.0.0/16）、規格視需要調整
@@ -869,7 +917,10 @@ aws-modules-lab/
   README.md                          給他人看的專案說明
   docs/
     terraform-module化-dev版.md      本文件，操作與設計紀錄
+    terraform-cicd-oidc-roadmap.md   CI/CD + OIDC 實作手冊
+  .github/workflows/                 plan / apply / destroy
   terraform/
+    bootstrap/
     modules/
     environments/
 ```
@@ -1018,7 +1069,7 @@ terraform plan -out=tfplan     # 存下 plan，確保 apply 時執行的與預�
 terraform apply tfplan         # 套用已存的 plan，不會再問 yes
 
 terraform apply -target=module.vpc      # 只套用特定 module（除錯用，平時避免）
-terraform destroy -target=module.database   # 只刪特定 module
+terraform destroy -target=module.db   # 只刪特定 module
 
 terraform refresh              # 以實際 AWS 現況更新 state
 terraform show                 # 顯示目前 state 的完整內容
@@ -1054,7 +1105,7 @@ terraform plan -target=module.web_tier
 - `main.tf` 中宣告的每個 `module` 區塊，對應的 `modules/` 資料夾都必須存在，否則 `terraform init` 出現 `Unreadable module directory` 錯誤。尚未建立的 module 不要寫入 `main.tf`。
 - HCL 單行區塊僅允許一個參數，兩個以上須換行。
 - module 的 output 不會自動傳到環境層，需在 `environments/dev/outputs.tf` 再輸出一次。
-- S3 bucket 須手動建立，不可由 Terraform 自身管理。
+- state bucket 由 `bootstrap/` 管理（本機 apply），不可由使用它的環境或 CI 管理。
 - 資料庫密碼不得寫入 `terraform.tfvars`（該檔需進版控），應另存於 `secrets.auto.tfvars`。
 - **ALB 與 RDS 為持續計費資源，練習結束務必 `terraform destroy`。**
 - 修改 SG 的 `description` 會觸發資源重建（`# forces replacement`），若該 SG 被其他 SG 引用，可能因 `DependencyViolation` 而刪除失敗。plan 中看到 `-/+` 或 `forces replacement` 必須停下確認。
@@ -1074,14 +1125,20 @@ terraform plan -target=module.web_tier
 | `terraform apply` 24 個資源建置成功 | 完成 |
 | ALB 回應驗證（Tomcat OK，由 private IP 提供服務） | 完成 |
 | output 逐層輸出（alb_dns、rds_endpoint） | 完成 |
+| `bootstrap/` import state bucket、OIDC、CI role | 完成 |
+| `environments/staging/`（29 個資源 apply / destroy 驗證） | 完成 |
+| `moved.tf`：`module.database` → `module.db`（RDS 不重建） | 完成 |
+| AWS provider `~> 5.0` → `~> 6.0`（plan 0 change） | 完成 |
+| GitHub Actions plan / apply / destroy（OIDC） | 完成 |
+| vpc `enable_nat` 開關（`count`，dev 不開）與 subnet `kubernetes.io` tag | 完成 |
+| `environments/eks/` | 進行中 |
 
 ### 後續可擴充項目
 
-- `environments/staging/`、`environments/prod/`
+- `environments/prod/`
 - Redis（ElastiCache）module
 - bastion EC2 本體（目前僅建立 SG，尚無跳板機可 SSH 進 private subnet）
-- NAT Gateway（private subnet 機器目前無對外路由，AMI 需自帶所有軟體）
-- 資源開關（以 `count` 控制 RDS 等高費用資源是否建立）
+- RDS 等高費用資源的 `count` 開關
 - IAM 權限分級
 - GitLab CI 自動 plan / apply
 - SSM Session Manager 取代跳板機
