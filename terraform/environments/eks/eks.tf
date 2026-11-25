@@ -1,3 +1,6 @@
+#trivy:ignore:AWS-0040 lab 工作機在 VPC 外（無 VPN / bastion），需 public endpoint 才能 kubectl；叢集用完即 destroy；prod 改 private endpoint
+#trivy:ignore:AWS-0041 工作機出口 IP 不固定且 repo 為 public，不寫入 IP；prod 限定公司出口 CIDR
+#trivy:ignore:AWS-0104 node 需經 NAT 拉 image（ECR / Docker Hub）及呼叫 AWS API，為 EKS module 預設 egress 規則
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 21.0"
