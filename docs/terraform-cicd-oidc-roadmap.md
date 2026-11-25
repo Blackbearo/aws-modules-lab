@@ -6,8 +6,9 @@
 
 | 項目 | 值 |
 |---|---|
-| Repo | `Blackbearo/aws-modules-lab`（private） |
-| 工作機 | K8s-w1（OL9） |
+| Repo | `Blackbearo/aws-modules-lab`（public） |
+| 工作機 | AWS（OL10.2） |
+| AWS provider | `~> 6.0`（dev 鎖 6.73.0） |
 | AWS 帳號 | `575005867578` |
 | Region | `ap-northeast-1` |
 | State bucket | `luke-tfstate-2026` |
@@ -26,7 +27,7 @@
 | 2 | plan pipeline | ✅ |
 | 3 | 安全掃描（Trivy + Checkov） | ✅ Failed 33→0 |
 | 4 | apply / destroy pipeline | ✅ ALB 回 200 |
-| 5 | 後續強化 | 🔄 |
+| 5 | 後續強化（bootstrap、staging、釘 SHA、轉 public） | 🔄 drift detection 未做 |
 
 ---
 
@@ -38,13 +39,12 @@
 | `Not authorized to perform sts:AssumeRoleWithWebIdentity` | trust policy 的 `sub` 對不上 | GitHub 現在用 **immutable subject claim**，格式是 `repo:<owner>@<id>/<repo>@<id>:<context>`，網路教學都是舊格式 |
 | `Credentials could not be loaded` | 缺 `permissions: id-token: write` | 加上 |
 | `Set up job` 就失敗 | workflow 定義錯（action 版本不存在等） | 看錯誤訊息，不用往下查 |
-| `unable to find version 0.28.0` | trivy-action tag 不對 | 用 `@v0.36.0`，**有 v 前綴** |
+| `unable to find version 0.28.0` | trivy-action tag 不對 | 釘 commit SHA，行尾註解版本（`# v0.36.0`，**有 v 前綴**） |
 | action 參數填 `''` | 空字串≠不指定 | 不指定就整行刪掉 |
 | Checkov 過了但 Trivy 還是紅 | 兩者豁免語法不通用 | Checkov 用 `# checkov:skip=ID:理由`（區塊內），Trivy 用 `#trivy:ignore:ID 理由`（區塊上一行） |
 | skip 寫了沒生效 | 寫在錯的資源上 | 看報告的 `FAILED for resource:` 指向誰就寫在誰身上 |
-| Environment 沒有 Required reviewers 選項 | GitHub 方案限制 | Free/Pro/Team 的 private repo 都沒有，要 Enterprise 或轉 public。改用 `workflow_dispatch` |
-| branch protection 說不會生效 | 同上 | 照建，升級或轉 public 就生效 |
-| PR 永遠 merge 不了 | 勾了 `Require approvals` | 一個人不能核准自己的 PR，**不要勾** |
+| Environment 沒有 Required reviewers 選項 | GitHub 方案限制 | Free/Pro/Team 的 private repo 都沒有；已轉 public 並開啟 |
+| branch protection 說不會生效 | 同上 | 轉 public 後生效 || PR 永遠 merge 不了 | 勾了 `Require approvals` | 一個人不能核准自己的 PR，**不要勾** |
 | `terraform fmt` 本機過 CI 沒過 | `-chdir` 只掃該目錄 | 在 **repo 根目錄**跑 |
 | inline policy 建到獨立 policy 去了 | 從 `policy` 選單進去 | 要從 **role 詳細頁 → license 分頁 → New license ▾** 進 |
 | 找不到 Run workflow 按鈕 | `workflow_dispatch` 只在 main 出現 | 先 merge 進 main |
@@ -312,14 +312,14 @@ jobs:
       run:
         working-directory: terraform/environments/dev
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: arn:aws:iam::575005867578:role/gh-terraform-plan
           aws-region: ap-northeast-1
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: "1.10.5"
           terraform_wrapper: false
@@ -332,7 +332,7 @@ jobs:
         run: terraform init -input=false
 
       - name: Trivy config scan
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: config
           scan-ref: terraform/
@@ -340,7 +340,7 @@ jobs:
           exit-code: '1'
 
       - name: Checkov
-        uses: bridgecrewio/checkov-action@master
+        uses: bridgecrewio/checkov-action@b17b606d6ec72bb8ba5721ad5b7e340b80a9fc39 # v12.3142.0
         with:
           directory: terraform/
           framework: terraform
@@ -360,7 +360,7 @@ jobs:
           echo "exitcode=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: 把 plan 貼回 PR
-        uses: actions/github-script@v7
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
             const fs = require('fs');
@@ -476,7 +476,7 @@ resource "aws_subnet" "public" {
 
 ```hcl
 variable "env_name" {
-  description = "環境名稱,會加進資源的 Name tag"
+  description = "環境名稱,會加進資源的 Name tag,例如 dev、staging、prod"
   type        = string
 }
 
@@ -492,9 +492,15 @@ variable "azs" {
 }
 
 variable "flow_log_retention_days" {
-  description = "Flow Log 保存天數"
+  description = "VPC Flow Log 在 CloudWatch 的保存天數。dev 設短以控制成本"
   type        = number
   default     = 30
+}
+
+variable "enable_nat" {
+  description = "建 NAT Gateway（EKS node 在 private subnet 要出網）；dev 不開"
+  type        = bool
+  default     = false
 }
 ```
 
@@ -508,21 +514,23 @@ resource "aws_vpc" "this" {
   tags                 = { Name = "${var.env_name}-vpc" }
 }
 
-# 接管 AWS 自動產生的預設 SG 並清空規則（不宣告 ingress/egress = 移除全部）
+# CKV2_AWS_12：VPC 預設 SG 不應允許任何流量。
+# 此資源不會「建立」SG（AWS 自動產生），而是接管它並清空所有規則。
+# 未宣告 ingress / egress 區塊 = 移除全部規則。
 resource "aws_default_security_group" "this" {
   vpc_id = aws_vpc.this.id
   tags   = { Name = "${var.env_name}-sg-default-locked" }
 }
 
-#trivy:ignore:AWS-0164 public subnet 配公有 IP 是設計
+#trivy:ignore:AWS-0164 public subnet 依定義供對外資源使用,自動配發公有 IP 為預期行為
 resource "aws_subnet" "public" {
-  # checkov:skip=CKV_AWS_130:public subnet 配公有 IP 是設計
+  # checkov:skip=CKV_AWS_130:public subnet 依定義供對外資源使用,自動配發公有 IP 為預期行為
   count                   = length(var.azs)
   vpc_id                  = aws_vpc.this.id
   cidr_block              = cidrsubnet(var.vpc_cidr, 8, count.index + 1)
   availability_zone       = var.azs[count.index]
   map_public_ip_on_launch = true
-  tags                    = { Name = "${var.env_name}-public-${var.azs[count.index]}" }
+  tags                    = { Name = "${var.env_name}-public-${var.azs[count.index]}", "kubernetes.io/role/elb" = "1" }
 }
 
 resource "aws_subnet" "private" {
@@ -530,7 +538,7 @@ resource "aws_subnet" "private" {
   vpc_id            = aws_vpc.this.id
   cidr_block        = cidrsubnet(var.vpc_cidr, 8, count.index + 11)
   availability_zone = var.azs[count.index]
-  tags              = { Name = "${var.env_name}-private-${var.azs[count.index]}" }
+  tags              = { Name = "${var.env_name}-private-${var.azs[count.index]}", "kubernetes.io/role/internal-elb" = "1" }
 }
 
 resource "aws_internet_gateway" "this" {
@@ -547,7 +555,8 @@ resource "aws_route_table" "public" {
   tags = { Name = "${var.env_name}-rt-public" }
 }
 
-# 刻意不設 0.0.0.0/0：沒有 NAT Gateway，private subnet 不對外，每月省約 $32
+# 注意:private route table 刻意不設 0.0.0.0/0 路由。
+# 無 NAT Gateway = private subnet 無對外網路,亦即每月省下約 $32。
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.this.id
   tags   = { Name = "${var.env_name}-rt-private" }
@@ -565,11 +574,11 @@ resource "aws_route_table_association" "private" {
   route_table_id = aws_route_table.private.id
 }
 
-# ---------- VPC Flow Logs ----------
+# ---------- VPC Flow Logs (CKV2_AWS_11) ----------
 
 resource "aws_cloudwatch_log_group" "flow_logs" {
-  # checkov:skip=CKV_AWS_158:dev 用預設加密,KMS CMK 另計約 $1/月
-  # checkov:skip=CKV_AWS_338:dev 保存 30 天即可
+  # checkov:skip=CKV_AWS_158:dev 環境使用 CloudWatch 預設加密,KMS CMK 另計約 $1/月
+  # checkov:skip=CKV_AWS_338:dev 環境保存 30 天即可,保存一年會顯著增加成本
   name              = "/aws/vpc-flow-logs/${var.env_name}"
   retention_in_days = var.flow_log_retention_days
   tags              = { Name = "${var.env_name}-flow-logs" }
@@ -577,6 +586,7 @@ resource "aws_cloudwatch_log_group" "flow_logs" {
 
 resource "aws_iam_role" "flow_logs" {
   name = "${var.env_name}-vpc-flow-logs-role"
+
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -585,18 +595,24 @@ resource "aws_iam_role" "flow_logs" {
       Action    = "sts:AssumeRole"
     }]
   })
+
   tags = { Name = "${var.env_name}-vpc-flow-logs-role" }
 }
 
 resource "aws_iam_role_policy" "flow_logs" {
   name = "${var.env_name}-vpc-flow-logs-policy"
   role = aws_iam_role.flow_logs.id
+
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Effect   = "Allow"
-        Action   = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"]
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:DescribeLogStreams"
+        ]
         Resource = "${aws_cloudwatch_log_group.flow_logs.arn}:*"
       },
       {
@@ -615,6 +631,28 @@ resource "aws_flow_log" "this" {
   log_destination      = aws_cloudwatch_log_group.flow_logs.arn
   iam_role_arn         = aws_iam_role.flow_logs.arn
   tags                 = { Name = "${var.env_name}-flow-log" }
+}
+
+resource "aws_eip" "nat" {
+  count  = var.enable_nat ? 1 : 0
+  domain = "vpc"
+  tags   = { Name = "${var.env_name}-nat-eip" }
+}
+
+resource "aws_nat_gateway" "this" {
+  count         = var.enable_nat ? 1 : 0
+  allocation_id = aws_eip.nat[0].id
+  subnet_id     = aws_subnet.public[0].id
+  tags          = { Name = "${var.env_name}-nat" }
+
+  depends_on = [aws_internet_gateway.this]
+}
+
+resource "aws_route" "private_nat" {
+  count                  = var.enable_nat ? 1 : 0
+  route_table_id         = aws_route_table.private.id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.this[0].id
 }
 ```
 
@@ -676,7 +714,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
   }
 }
@@ -957,7 +995,7 @@ module "web_tier" {
   vpc_cidr = var.vpc_cidr        # 新增
 }
 
-module "database" {
+module "db" {
   # ...原有參數...
   vpc_cidr = var.vpc_cidr        # 新增
 }
@@ -1069,11 +1107,14 @@ repo → Settings → Environments → New environment
 Name: dev            ← 要跟 trust policy 的 sub 一字不差
 ```
 
-**Required reviewers 不會出現**——Free/Pro/Team 的 private repo 沒有這功能，要 Enterprise 或轉 public。改用 workflow_dispatch 打字確認。
+```
+✅ Required reviewers → 加自己        ← public repo 才有
+❌ Prevent self-reviews                ← 單人 repo 勾了會無法 approve
+```
 
-environment 還是要建，因為 OIDC 的 `sub` 需要它存在。
+environment 一定要建，因為 OIDC 的 `sub` 需要它存在。
 
-順便鎖分支（這項 private repo 可用）：
+鎖分支：
 
 ```
 Deployment branches and tags → 右上「No restriction」下拉
@@ -1115,14 +1156,14 @@ jobs:
           echo "confirm 必須輸入 apply，收到：'${{ inputs.confirm }}'"
           exit 1
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: arn:aws:iam::575005867578:role/gh-terraform-apply
           aws-region: ap-northeast-1
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: "1.10.5"
           terraform_wrapper: false
@@ -1174,14 +1215,14 @@ jobs:
           echo "confirm 必須輸入 destroy-dev，收到：'${{ inputs.confirm }}'"
           exit 1
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: arn:aws:iam::575005867578:role/gh-terraform-apply
           aws-region: ap-northeast-1
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: "1.10.5"
           terraform_wrapper: false
@@ -1212,9 +1253,7 @@ Branch name pattern: main
 ❌ Allow force pushes / Allow deletions
 ```
 
-上方會顯示「不會在 private repo 強制執行」，那是方案限制。還是建起來，升級或轉 public 就生效。
-
-實際擋得住的是：workflow_dispatch 打字確認、Deployment branches 限定 main。
+apply 的關卡：workflow_dispatch 打字確認 → Required reviewers 核准 → Deployment branches 限定 main。
 
 ## 4-7 執行
 
@@ -1241,7 +1280,9 @@ curl -I http://<ALB DNS>
 
 **先確認 destroy workflow 已經可用**，不然停用後清不掉環境。
 
-這把 key 是給 K8s-w1 用的，**跟 GitHub 無關**（GitHub 走 OIDC）。停用不影響 pipeline。
+這把 key 是給工作機用的，**跟 GitHub 無關**（GitHub 走 OIDC）。停用不影響 pipeline。
+
+> ⚠️ `bootstrap/`、`environments/eks` 只能本機用 luke apply（CI role 沒有 IAM 權限），要用時才建 key；換工作機一律建新 key、刪舊 key。
 
 ```
 IAM → IAM users → luke →「Security Certificates」分頁
@@ -1264,18 +1305,23 @@ IAM → IAM users → luke →「Security Certificates」分頁
 
 # 階段 5：待辦
 
-| 項目 | 說明 |
-|---|---|
-| Drift detection | 排程跑 `terraform plan -detailed-exitcode`，有差異就開 issue |
-| SSM Session Manager | 不開 22 port，走 AWS API 進去，自帶稽核 log |
-| Secrets Manager | 密碼不經過 CI |
-| IAM/OIDC 寫成 Terraform | 放 `bootstrap/`，注意管 CI 權限的東西不能由 CI apply |
-| 開 staging 環境 | 驗證 module 化真的讓多環境變便宜 |
-| 移植到 GitLab CI | `id_tokens` 拿 JWT + `aws sts assume-role-with-web-identity`，`when: manual` 當閘門 |
-| ALB HTTPS | 需 ACM 憑證 + 網域 |
-| ALB access log | 需另建 S3 bucket + policy |
-| action 釘 commit SHA | `@master` 最危險，trivy-action 曾遭供應鏈攻擊 |
-| 收窄 IAM 權限 | role →「Last access」分頁 或「Policy generation」從 CloudTrail 產生 |
+| 項目 | 說明 | 狀態 |
+|---|---|---|
+| IAM/OIDC 寫成 Terraform | `bootstrap/`（import 既有 bucket、OIDC、role，加 `prevent_destroy`）；管 CI 權限的東西不能由 CI apply | ✅ |
+| 開 staging 環境 | `environments/staging`，同 module 換 tfvars + backend key | ✅ |
+| module 改名不重建 | `moved.tf`：`module.database` → `module.db` | ✅ |
+| AWS provider 6.x | `~> 5.0` → `~> 6.0`，plan 0 change | ✅ |
+| action 釘 commit SHA | `@master` 最危險，trivy-action 曾遭供應鏈攻擊；SHA 後註解版本 | ✅ |
+| action 升 Node 24 | checkout v7.0.1、aws v6.3.0、setup-terraform v4.0.1、github-script v8.0.0 | ✅ |
+| 轉 public + Required reviewers | 先掃 Git 歷史無機敏值 | ✅ |
+| EKS 環境 | `environments/eks`（社群 EKS module v21、vpc `enable_nat`），本機 apply | 🔄 |
+| Drift detection | 排程跑 `terraform plan -detailed-exitcode`，有差異就開 issue | ⬜ |
+| SSM Session Manager | 不開 22 port，走 AWS API 進去，自帶稽核 log | ⬜ |
+| Secrets Manager | 密碼不經過 CI | ⬜ |
+| 移植到 GitLab CI | `id_tokens` 拿 JWT + `aws sts assume-role-with-web-identity`，`when: manual` 當閘門 | ⬜ |
+| ALB HTTPS | 需 ACM 憑證 + 網域 | ⬜ |
+| ALB access log | 需另建 S3 bucket + policy | ⬜ |
+| 收窄 IAM 權限 | role →「Last access」分頁 或「Policy generation」從 CloudTrail 產生 | ⬜ |
 
 ---
 
