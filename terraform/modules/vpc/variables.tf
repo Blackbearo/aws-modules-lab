@@ -19,3 +19,9 @@ variable "flow_log_retention_days" {
   type        = number
   default     = 30
 }
+
+variable "enable_nat" {
+  description = "建 NAT Gateway（EKS node 在 private subnet 要出網）；dev 不開"
+  type        = bool
+  default     = false
+}
