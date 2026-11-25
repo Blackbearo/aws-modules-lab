@@ -2,8 +2,7 @@
 #trivy:ignore:AWS-0041 工作機出口 IP 不固定且 repo 為 public，不寫入 IP；prod 限定公司出口 CIDR
 #trivy:ignore:AWS-0104 node 需經 NAT 拉 image（ECR / Docker Hub）及呼叫 AWS API，為 EKS module 預設 egress 規則
 module "eks" {
-  source  = "terraform-aws-modules/eks/aws"
-  version = "~> 21.0"
+  source = "git::https://github.com/terraform-aws-modules/terraform-aws-eks.git?ref=25c846a384bc66d16cc801d2f851431deb38de5d" # v21.30.2（釘 commit SHA，同 action 釘 SHA）
 
   name               = "lab-eks"
   kubernetes_version = "1.37" # standard support 內最新版；舊版進 extended support 每小時 US$0.60
